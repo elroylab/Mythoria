@@ -1,0 +1,734 @@
+﻿
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="utf-8">
+    <title>Dragon Cave VR Demo - Mythoria</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 300px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #story {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 200;
+            background: rgba(0,0,0,0.9);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 400px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3>🐉 Σπήλαιο του Δράκου</h3>
+        <p>WebXR Demo για Mythoria Project</p>
+        <p><strong>Χειρισμοί:</strong></p>
+        <p>• Mouse: Περιστροφή κάμερας</p>
+        <p>• W,A,S,D: Κίνηση</p>
+        <p>• Space: Αλληλεπίδραση</p>
+    </div>
+
+    <div id="controls">
+        <button id="vrButton" disabled>Φόρτωση VR...</button>
+        <button id="desktopButton">🖥️ Desktop Mode</button>
+        <button id="storyButton">📖 Ιστορία του Δράκου</button>
+        <button id="nftButton">💰 Δες NFT Artifacts</button>
+    </div>
+
+    <div id="story">
+        <h3>🐉 Ο Μύθος του Δράκου</h3>
+        <p>Σύμφωνα με την τοπική παράδοση, το σπήλαιο ήταν κάποτε ένα φυλασσόμενο χρυσωρυχείο, προστατευμένο από έναν άγριο δράκο που έβγαζε φωτιά και δηλητηριώδεις ατμούς...</p>
+        <button onclick="closeStory()">Κλείσιμο</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, controller;
+        let cave, dragon, spear, goldDust;
+        let vrSupported = false;
+        let interactionObjects = [];
+
+        // Βασική σκηνή
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x1a1a2e, 10, 100);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2, 10);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x0f0f23);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // WebXR setup
+            renderer.xr.enabled = true;
+            checkVRSupport();
+            
+            createCaveEnvironment();
+            createDragon();
+            createNFTArtifacts();
+            addLighting();
+            addControls();
+            
+            animate();
+        }
+
+        function checkVRSupport() {
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    vrSupported = supported;
+                    const vrButton = document.getElementById('vrButton');
+                    if (supported) {
+                        vrButton.textContent = '🥽 Μπες σε VR';
+                        vrButton.disabled = false;
+                        vrButton.onclick = startVR;
+                    } else {
+                        vrButton.textContent = 'VR δεν υποστηρίζεται';
+                        vrButton.style.opacity = '0.5';
+                    }
+                });
+            } else {
+                document.getElementById('vrButton').textContent = 'WebXR δεν υποστηρίζεται';
+                document.getElementById('vrButton').style.opacity = '0.5';
+            }
+            
+            // Desktop mode button - always available
+            const desktopButton = document.getElementById('desktopButton');
+            desktopButton.onclick = startDesktopMode;
+            desktopButton.style.background = '#2196F3';
+        }
+
+        function startVR() {
+            navigator.xr.requestSession('immersive-vr').then((session) => {
+                renderer.xr.setSession(session);
+            });
+        }
+
+        function startDesktopMode() {
+            // Hide info and controls for immersive experience
+            document.getElementById('info').style.display = 'none';
+            document.getElementById('controls').innerHTML = 
+                '<button onclick="exitDesktopMode()">🚪 Έξοδος</button>';
+            
+            // Enable pointer lock for better desktop experience
+            document.body.requestPointerLock = document.body.requestPointerLock ||
+                                                document.body.mozRequestPointerLock;
+            document.body.requestPointerLock();
+            
+            // Show instructions overlay
+            showInstructions();
+        }
+
+        function exitDesktopMode() {
+            document.getElementById('info').style.display = 'block';
+            document.getElementById('controls').innerHTML = 
+                '<button id="vrButton" disabled>Φόρτωση VR...</button>' +
+                '<button id="desktopButton">🖥️ Desktop Mode</button>' +
+                '<button id="storyButton">📖 Ιστορία του Δράκου</button>' +
+                '<button id="nftButton">💰 Δες NFT Artifacts</button>';
+            
+            // Restore event listeners
+            checkVRSupport();
+            document.getElementById('storyButton').onclick = showStory;
+            document.getElementById('nftButton').onclick = showNFTs;
+            
+            // Exit pointer lock
+            document.exitPointerLock = document.exitPointerLock ||
+                                       document.mozExitPointerLock;
+            document.exitPointerLock();
+            
+            hideInstructions();
+        }
+
+        function showInstructions() {
+            const instructionsDiv = document.createElement('div');
+            instructionsDiv.id = 'instructions';
+            instructionsDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: rgba(0,0,0,0.8);
+                color: white;
+                padding: 15px;
+                border-radius: 8px;
+                z-index: 1000;
+                font-family: Arial, sans-serif;
+            `;
+            instructionsDiv.innerHTML = `
+                <h4>🎮 Χειρισμοί Desktop Mode</h4>
+                <p>🖱️ Mouse: Κοίτα γύρω</p>
+                <p>⌨️ W,A,S,D: Κίνηση</p>
+                <p>🔘 Space: Αλληλεπίδραση με NFTs</p>
+                <p>📱 Click για να κλειδώσει το mouse</p>
+            `;
+            document.body.appendChild(instructionsDiv);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                if (document.getElementById('instructions')) {
+                    document.getElementById('instructions').style.opacity = '0.3';
+                }
+            }, 5000);
+        }
+
+        function hideInstructions() {
+            const instructions = document.getElementById('instructions');
+            if (instructions) {
+                instructions.remove();
+            }
+        }
+
+        function createCaveEnvironment() {
+            // Βασικό σπήλαιο
+            const caveGeometry = new THREE.CylinderGeometry(15, 18, 20, 8);
+            const caveMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x2d2d2d,
+                side: THREE.BackSide 
+            });
+            cave = new THREE.Mesh(caveGeometry, caveMaterial);
+            cave.position.y = -5;
+            scene.add(cave);
+
+            // Smaller, more realistic stalactites
+            for (let i = 0; i < 8; i++) {
+                const stalactiteGeometry = new THREE.ConeGeometry(0.2, 1 + Math.random() * 1, 6);
+                const stalactiteMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+                const stalactite = new THREE.Mesh(stalactiteGeometry, stalactiteMaterial);
+                
+                stalactite.position.set(
+                    (Math.random() - 0.5) * 12,
+                    4 + Math.random() * 1,
+                    (Math.random() - 0.5) * 12
+                );
+                scene.add(stalactite);
+                
+                // Add corresponding stalagmites
+                const stalagmiteGeometry = new THREE.ConeGeometry(0.15, 0.5 + Math.random() * 0.8, 6);
+                const stalagmite = new THREE.Mesh(stalagmiteGeometry, stalactiteMaterial);
+                stalagmite.position.set(
+                    stalactite.position.x + (Math.random() - 0.5) * 0.5,
+                    -7.5,
+                    stalactite.position.z + (Math.random() - 0.5) * 0.5
+                );
+                stalagmite.rotation.x = Math.PI;
+                scene.add(stalagmite);
+            }
+
+            // Υπόγεια λίμνη
+            const lakeGeometry = new THREE.CircleGeometry(8, 32);
+            const lakeMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x1e3a8a,
+                transparent: true,
+                opacity: 0.7,
+                reflectivity: 0.5
+            });
+            const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
+            lake.rotation.x = -Math.PI / 2;
+            lake.position.y = -8;
+            scene.add(lake);
+
+            // Χρυσαφί λάσπη στις άκρες
+            const mudGeometry = new THREE.RingGeometry(8, 12, 16);
+            const mudMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x8b6914,
+                transparent: true,
+                opacity: 0.6
+            });
+            const mud = new THREE.Mesh(mudGeometry, mudMaterial);
+            mud.rotation.x = -Math.PI / 2;
+            mud.position.y = -7.9;
+            scene.add(mud);
+        }
+
+        function createDragon() {
+            // More realistic dragon shape
+            const dragonGroup = new THREE.Group();
+            
+            // Main body - using cylinder instead of capsule
+            const bodyGeometry = new THREE.CylinderGeometry(0.8, 0.8, 3, 12);
+            const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x8b0000 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.z = Math.PI / 2;
+            dragonGroup.add(body);
+
+            // Add spheres at the ends of the cylinder to create capsule-like shape
+            const endSphereGeometry = new THREE.SphereGeometry(0.8, 12, 8);
+            const frontSphere = new THREE.Mesh(endSphereGeometry, bodyMaterial);
+            frontSphere.position.set(1.5, 0, 0);
+            dragonGroup.add(frontSphere);
+            
+            const backSphere = new THREE.Mesh(endSphereGeometry, bodyMaterial);
+            backSphere.position.set(-1.5, 0, 0);
+            dragonGroup.add(backSphere);
+
+            // Head - more dragon-like
+            const headGeometry = new THREE.SphereGeometry(1, 12, 8);
+            const head = new THREE.Mesh(headGeometry, bodyMaterial);
+            head.position.set(2.5, 0, 0);
+            head.scale.set(1.2, 0.8, 1.5); // Make it more elongated
+            dragonGroup.add(head);
+
+            // Snout
+            const snoutGeometry = new THREE.ConeGeometry(0.3, 0.8, 8);
+            const snout = new THREE.Mesh(snoutGeometry, bodyMaterial);
+            snout.rotation.z = -Math.PI / 2;
+            snout.position.set(3.2, 0, 0);
+            dragonGroup.add(snout);
+
+            // Neck connecting body to head
+            const neckGeometry = new THREE.CylinderGeometry(0.6, 0.8, 1.5, 8);
+            const neck = new THREE.Mesh(neckGeometry, bodyMaterial);
+            neck.rotation.z = Math.PI / 2;
+            neck.position.set(1.2, 0, 0);
+            dragonGroup.add(neck);
+
+            // Wings - more bat-like
+            const wingGeometry = new THREE.PlaneGeometry(2.5, 1.8);
+            const wingMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x654321,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9
+            });
+            
+            const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftWing.position.set(-0.5, 0, 1.8);
+            leftWing.rotation.x = Math.PI / 6;
+            leftWing.rotation.y = Math.PI / 4;
+            dragonGroup.add(leftWing);
+
+            const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            rightWing.position.set(-0.5, 0, -1.8);
+            rightWing.rotation.x = -Math.PI / 6;
+            rightWing.rotation.y = -Math.PI / 4;
+            dragonGroup.add(rightWing);
+
+            // Tail
+            const tailGeometry = new THREE.ConeGeometry(0.4, 2, 8);
+            const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+            tail.rotation.z = Math.PI / 2;
+            tail.position.set(-2.5, 0, 0);
+            dragonGroup.add(tail);
+
+            // Glowing eyes
+            const eyeGeometry = new THREE.SphereGeometry(0.15, 8, 6);
+            const eyeMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xff4500,
+                emissive: 0xff2200
+            });
+            
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(3.2, 0.4, 0.4);
+            dragonGroup.add(leftEye);
+
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(3.2, 0.4, -0.4);
+            dragonGroup.add(rightEye);
+
+            // Legs
+            const legGeometry = new THREE.CylinderGeometry(0.2, 0.15, 1, 6);
+            const legMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+            
+            for(let i = 0; i < 4; i++) {
+                const leg = new THREE.Mesh(legGeometry, legMaterial);
+                leg.position.set(
+                    i < 2 ? 0.5 : -0.5,
+                    -1.3,
+                    i % 2 === 0 ? 0.8 : -0.8
+                );
+                dragonGroup.add(leg);
+            }
+
+            dragonGroup.position.set(-5, 0, -5);
+            dragonGroup.scale.set(1.2, 1.2, 1.2);
+            dragon = dragonGroup;
+            scene.add(dragon);
+
+            // Gentle animation
+            function animateDragon() {
+                if (dragon) {
+                    dragon.rotation.y += 0.003;
+                    dragon.position.y = Math.sin(Date.now() * 0.0008) * 0.3;
+                    
+                    // Wing flapping - adjust indices for new dragon structure
+                    const wingFlap = Math.sin(Date.now() * 0.005) * 0.2;
+                    // Find wings in the dragon children array
+                    dragon.children.forEach((child, index) => {
+                        if (child.geometry instanceof THREE.PlaneGeometry) {
+                            if (child.position.z > 0) { // left wing
+                                child.rotation.x = Math.PI / 6 + wingFlap;
+                            } else { // right wing
+                                child.rotation.x = -Math.PI / 6 - wingFlap;
+                            }
+                        }
+                    });
+                }
+            }
+
+            setInterval(animateDragon, 16);
+        }
+
+        function createNFTArtifacts() {
+            // Σπαθί του ήρωα (NFT artifact)
+            const spearGroup = new THREE.Group();
+            
+            const handleGeometry = new THREE.CylinderGeometry(0.05, 0.08, 3, 8);
+            const handleMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+            const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+            spearGroup.add(handle);
+
+            const bladeGeometry = new THREE.ConeGeometry(0.2, 1, 6);
+            const bladeMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xc0c0c0,
+                shininess: 100 
+            });
+            const blade = new THREE.Mesh(bladeGeometry, bladeMaterial);
+            blade.position.y = 2;
+            spearGroup.add(blade);
+
+            spearGroup.position.set(3, 1, 3);
+            spearGroup.rotation.z = Math.PI / 4;
+            spear = spearGroup;
+            scene.add(spear);
+            interactionObjects.push(spear);
+
+            // Χρυσόσκονη (NFT artifact)
+            const dustGeometry = new THREE.SphereGeometry(0.3, 16, 12);
+            const dustMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xffd700,
+                transparent: true,
+                opacity: 0.8,
+                emissive: 0x332200
+            });
+            goldDust = new THREE.Mesh(dustGeometry, dustMaterial);
+            goldDust.position.set(-3, 1, 4);
+            scene.add(goldDust);
+            interactionObjects.push(goldDust);
+
+            // Glow effect για NFTs
+            function glowNFTs() {
+                const time = Date.now() * 0.002;
+                if (spear) {
+                    spear.children[1].material.emissive.setHex(
+                        Math.sin(time) > 0 ? 0x222222 : 0x000000
+                    );
+                }
+                if (goldDust) {
+                    goldDust.material.emissive.setHex(
+                        Math.sin(time + 1) > 0 ? 0x443300 : 0x221100
+                    );
+                }
+            }
+            setInterval(glowNFTs, 100);
+        }
+
+        function addLighting() {
+            // Ambient light - αυξημένη φωτεινότητα
+            const ambientLight = new THREE.AmbientLight(0x606060, 0.6);
+            scene.add(ambientLight);
+
+            // Main cave lighting - πιο φωτεινό και λευκό
+            const mainLight = new THREE.PointLight(0x8db4e1, 2, 60);
+            mainLight.position.set(0, 8, 0);
+            mainLight.castShadow = true;
+            scene.add(mainLight);
+
+            // Secondary light για καλύτερη ορατότητα
+            const secondaryLight = new THREE.PointLight(0xffffff, 1.5, 40);
+            secondaryLight.position.set(5, 3, 5);
+            scene.add(secondaryLight);
+
+            // Dragon fire light
+            const fireLight = new THREE.PointLight(0xff4500, 2, 20);
+            fireLight.position.set(-5, 1, -5);
+            scene.add(fireLight);
+
+            // Flickering fire effect
+            setInterval(() => {
+                fireLight.intensity = 1.5 + Math.random() * 0.5;
+            }, 200);
+        }
+
+        function addControls() {
+            const keys = {};
+            let isDesktopMode = false;
+            
+            document.addEventListener('keydown', (event) => {
+                keys[event.code] = true;
+                
+                if (event.code === 'Space') {
+                    checkInteractions();
+                    event.preventDefault();
+                }
+            });
+
+            document.addEventListener('keyup', (event) => {
+                keys[event.code] = false;
+            });
+
+            // Enhanced mouse controls for desktop mode
+            let mouseX = 0, mouseY = 0;
+            let isPointerLocked = false;
+
+            document.addEventListener('pointerlockchange', () => {
+                isPointerLocked = document.pointerLockElement === document.body;
+            });
+
+            document.addEventListener('mousemove', (event) => {
+                if (isPointerLocked) {
+                    // Desktop mode - first person camera
+                    const sensitivity = 0.002;
+                    camera.rotation.y -= event.movementX * sensitivity;
+                    camera.rotation.x -= event.movementY * sensitivity;
+                    
+                    // Clamp vertical rotation
+                    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                } else {
+                    // Regular mode - orbital camera
+                    mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+                }
+            });
+
+            function updateControls() {
+                const speed = 0.15;
+                
+                if (keys['KeyW']) {
+                    if (isPointerLocked) {
+                        // Move forward relative to camera direction
+                        const direction = new THREE.Vector3();
+                        camera.getWorldDirection(direction);
+                        camera.position.add(direction.multiplyScalar(speed));
+                    } else {
+                        camera.position.z -= speed;
+                    }
+                }
+                if (keys['KeyS']) {
+                    if (isPointerLocked) {
+                        const direction = new THREE.Vector3();
+                        camera.getWorldDirection(direction);
+                        camera.position.add(direction.multiplyScalar(-speed));
+                    } else {
+                        camera.position.z += speed;
+                    }
+                }
+                if (keys['KeyA']) {
+                    if (isPointerLocked) {
+                        const direction = new THREE.Vector3();
+                        camera.getWorldDirection(direction);
+                        const right = new THREE.Vector3();
+                        right.crossVectors(direction, camera.up);
+                        camera.position.add(right.multiplyScalar(-speed));
+                    } else {
+                        camera.position.x -= speed;
+                    }
+                }
+                if (keys['KeyD']) {
+                    if (isPointerLocked) {
+                        const direction = new THREE.Vector3();
+                        camera.getWorldDirection(direction);
+                        const right = new THREE.Vector3();
+                        right.crossVectors(direction, camera.up);
+                        camera.position.add(right.multiplyScalar(speed));
+                    } else {
+                        camera.position.x += speed;
+                    }
+                }
+
+                // Mouse look for non-desktop mode
+                if (!isPointerLocked) {
+                    camera.rotation.y = -mouseX * 0.5;
+                    camera.rotation.x = mouseY * 0.3;
+                }
+            }
+
+            // Set up the animation loop properly
+            function controlsAnimate() {
+                requestAnimationFrame(controlsAnimate);
+                updateControls();
+                renderer.render(scene, camera);
+            }
+            controlsAnimate();
+        }
+
+        function checkInteractions() {
+            const raycaster = new THREE.Raycaster();
+            const direction = new THREE.Vector3();
+            
+            // Get camera direction for raycast
+            camera.getWorldDirection(direction);
+            raycaster.set(camera.position, direction);
+            
+            const intersects = raycaster.intersectObjects(interactionObjects, true);
+            
+            if (intersects.length > 0) {
+                const object = intersects[0].object.parent || intersects[0].object;
+                
+                if (object === spear) {
+                    showNFTInfo('🗡️ NFT Artifact: Δόρυ του Ήρωα', 'Το μυθικό δόρυ που νίκησε τον δράκο!\nΑξία: 0.5 ETH\nΣπάνιο Epic item!');
+                } else if (object === goldDust) {
+                    showNFTInfo('💰 NFT Artifact: Χρυσόσκονη', 'Μαγική σκόνη από το σπήλαιο!\nΑξία: 0.3 ETH\nRare collectible!');
+                }
+            } else {
+                // Check if close to any NFT objects
+                const playerPos = camera.position;
+                const spearDistance = playerPos.distanceTo(spear.position);
+                const dustDistance = playerPos.distanceTo(goldDust.position);
+                
+                if (spearDistance < 3) {
+                    showNFTInfo('🗡️ NFT Artifact: Δόρυ του Ήρωα', 'Το μυθικό δόρυ που νίκησε τον δράκο!\nΑξία: 0.5 ETH\nΣπάνιο Epic item!');
+                } else if (dustDistance < 3) {
+                    showNFTInfo('💰 NFT Artifact: Χρυσόσκονη', 'Μαγική σκόνη από το σπήλαιο!\nΑξία: 0.3 ETH\nRare collectible!');
+                }
+            }
+        }
+
+        function showNFTInfo(title, description) {
+            // Create or update NFT info overlay
+            let nftInfo = document.getElementById('nftInfo');
+            if (!nftInfo) {
+                nftInfo = document.createElement('div');
+                nftInfo.id = 'nftInfo';
+                nftInfo.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(0,0,0,0.9);
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    border: 2px solid #ffd700;
+                    text-align: center;
+                    z-index: 2000;
+                    font-family: Arial, sans-serif;
+                    max-width: 400px;
+                `;
+                document.body.appendChild(nftInfo);
+            }
+            
+            nftInfo.innerHTML = `
+                <h3>${title}</h3>
+                <p style="white-space: pre-line;">${description}</p>
+                <button onclick="closeNFTInfo()" style="margin-top: 10px; padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Κλείσιμο</button>
+            `;
+            nftInfo.style.display = 'block';
+            
+            // Auto-close after 5 seconds
+            setTimeout(() => {
+                if (document.getElementById('nftInfo')) {
+                    closeNFTInfo();
+                }
+            }, 5000);
+        }
+
+        window.closeNFTInfo = function() {
+            const nftInfo = document.getElementById('nftInfo');
+            if (nftInfo) {
+                nftInfo.style.display = 'none';
+            }
+        }
+
+        function showStory() {
+            document.getElementById('story').style.display = 'block';
+        }
+
+        function closeStory() {
+            document.getElementById('story').style.display = 'none';
+        }
+
+        function showNFTs() {
+            alert('🎨 NFT Collection: Mythoria Dragon Cave\n\n' +
+                  '• Δόρυ του Ήρωα - 0.5 ETH\n' +
+                  '• Χρυσόσκονη - 0.3 ETH\n' +
+                  '• Δράκος Gurdian (legendary) - 5.8 ETH\n' +
+                  '• Μυστικός Χάρτης - 1.2 ETH\n\n' +
+                  'Συλλέξτε όλα τα artifacts για bonus rewards!');
+        }
+
+        window.showStory = showStory;
+        window.closeStory = closeStory;
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize the application
+        init();
+
+        // Set up button event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('storyButton').onclick = showStory;
+            document.getElementById('nftButton').onclick = showNFTs;
+        });
+    </script>
+</body>
+</html>
